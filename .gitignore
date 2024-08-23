@@ -4,6 +4,7 @@ src/authorized_clients.json
 src/config.py
 src/google_service_acc.json
 src/token.json
+src/oldtoken.json
 
 # TEMPORARY (DELETE LATER ONCE READY!!!)
 notes.txt
