@@ -1,5 +1,6 @@
 # Script for utilizing GPT and analyzing the data
 # from openai import OpenAI --> DEBUG
+'''
 import json
 import os
 
@@ -83,3 +84,4 @@ def report(summary_data, additional_comments=None):
         return "There was an error in generating the report. Please try again later."
     """
     return "MOCK SUMMARY FOR DEBUGGING"
+'''

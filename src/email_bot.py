@@ -1,5 +1,11 @@
-# Main script for handling email triggers, processing data, responses, and 
-# Google API interactions
+'''
+Name:    email_bot.py
+Author:  John Puka
+Purpose: Main script for handling email triggers, processing data, responses, 
+         and  Google API interactions
+'''
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask, request, jsonify
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
@@ -8,13 +14,15 @@ from googleapiclient.discovery import build
 from email.mime.text import MIMEText
 from faker import Faker
 from config import SPREADSHEET_IDS
-from gpt import report
+from faker import Faker
+# from gpt import report
 import os.path
 import unicodedata
 import random
 import base64
 import json
 import pandas as pd
+import time
 import re
 
 # Acess Google Sheets and Gmail
@@ -22,6 +30,8 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.modify',
           'https://www.googleapis.com/auth/spreadsheets']
 
 RANGE_NAME = 'Form Responses 1!A1:P1000'
+
+# app = Flask(__name__)
 
 '''
 Name:        authenticate_gmail
@@ -39,14 +49,14 @@ def authenticate_gmail():
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', 
                                                       scopes=SCOPES)
-        print("Loaded Gmail credentials from token.json") # Debug --> 1; GOOD
+        print("Loaded Gmail credentials from token.json successfuly.\n") # Debug --> 1; GOOD
 
     else:
-        print("Error: token.json not found.")
+        print("Error: token.json not found.\n")
         return None
 
     gmail_service = build('gmail', 'v1', credentials=creds)
-    print(f"Gmail service started: {gmail_service}") # Debug --> 2; GOOD (Gmail service started: <googleapiclient.discovery.Resource object at 0x00000219335797C0>)
+    print(f"Gmail service started: {gmail_service}.\n") # Debug --> 2; GOOD (Gmail service started: <googleapiclient.discovery.Resource object at 0x00000XXXXXXX>)
     return gmail_service
 
 '''
@@ -64,19 +74,10 @@ def check_email(gmail_service): # include google_sheets_service
     authorized_clients = load_authorized_clients()
 
     # Retrieve the 10 most recent emails in the inbox of the receiver (AUTOMATE THIS LATER)
-    results = gmail_service.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=10).execute()
+    results = gmail_service.users().messages().list(userId='me', 
+                                                    labelIds=['INBOX'], 
+                                                    maxResults=10).execute()
     messages = results.get('messages', [])
-
-    '''
-    # Sensitive Data
-src/credentials.json
-src/authorized_clients.
-src/config.py
-src/API_KEY.json
-
-# Environment Variables
-venv/
-    '''
 
     # Check if there are any emails
     if not messages:
@@ -84,7 +85,9 @@ venv/
     else:
         # Loop through each emails to process
         for message in messages:
-            msg = gmail_service.users().messages().get(userId='me', id=message['id']).execute()
+            msg = gmail_service.users().messages().get(userId='me', 
+                                                       id=message['id']
+                                                       ).execute()
             email_data = msg['payload']['headers']
             email_subject = None
             email_sender = None
@@ -99,7 +102,8 @@ venv/
             # Verify if the email sender is authorized and if the subject
             # contains the trigger phase
             if email_subject and email_sender:
-                if "generate report" in email_subject.lower() and email_sender in authorized_clients:
+                if "generate report" in email_subject.lower() and \
+                    email_sender in authorized_clients:
                     print(f"Processing request from {email_sender}") # Debug --> 5; GOOD
                     print("Authenticating Google Sheets...") # Debug --> 6; GOOD
                     authenticate_google_sheets()
@@ -108,7 +112,23 @@ venv/
                     # send_email(service_acc, email_sender, "Your Requested Report", summary)
                     print("Report sent!") # Debug (temporary) --> 9; GOOD
                 else:
-                    print(f"Ignoring email from {email_sender} with subject: {email_subject}")
+                    print(f"Ignoring email from {email_sender} with subject: "
+                          f"{email_subject}")
+'''
+Name:        scheduler()
+Purpose:     Sets a monthly scheduled report generation task to be executed
+Inputs:      None
+Outputs:     None
+Effects:     Schedules a task to run the check_email function each month
+Assumptions: The check_email function is defined # CHECK IF SYSTEM HAS A TASK
+'''
+def scheduler():
+    # Set up the scheduler
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(check_email, 'cron', day=29, hour=7, minute=0, 
+                      args=[gmail_service] ) # Run morning on the 29th monthly
+    scheduler.start()
+    print("Scheduler started") # Debug
 
 '''
 Name:        load_authorized_clients (helper function)
@@ -147,10 +167,12 @@ def extract_email_address(email_string):
 Name:        authenticate_google_sheets
 Purpose:     Authenticates with the Sheets API using a 'token.json' file that 
              contains the OAuth authentication
-Input:
-Output:
-Effects:
-Assumptions:
+Input:       None
+Outputs:     A Google Sheets service object if authentication is enabled; 
+             otherwise None
+Effects:     Reads from the 'token.json' file
+Assumptions: The file 'token.json' exists and contains valid credentials for 
+             Google Sheets
 '''
 def authenticate_google_sheets():
     creds = None
@@ -166,9 +188,82 @@ def authenticate_google_sheets():
     google_sheets_service = build('sheets', 'v4', credentials=creds)
     print(f"Authenticated Google Sheets service: {google_sheets_service}" ) # Debug --> 8; GOOD (Authenticated Google Sheets service: <googleapiclient.discovery.Resource object at 0x000001C5CFBCCA40>)
     return google_sheets_service
+r"""
+###############################################################################
 
-"""
-def normalize_column_names(df):
+def read_sheet_data(google_sheets_service, spreadsheet_id):
+    format_type = SPREADSHEET_IDS[spreadsheet_id]
+    RANGE_NAME = 'Form Responses 1!A1:P1000'
+    
+    sheet = google_sheets_service.spreadsheets()
+    result = google_sheets_service.values().get(spreadsheetId=spreadsheet_id,
+                                                range=RANGE_NAME).execute()
+    values = result.get('values', [])
+
+    if not values:
+        print('No data found.')
+        return None
+    
+    # Convert the data to a DataFrame
+    df = pd.DataFrame(values[1:], columns=values[0])
+
+    # Normalize the column names by removing diacritical marks and clean data
+    df = normalize_column_names(df, format_type)
+    df = clean_data(df, format_type)
+
+    print("Normalized Columns:", df.columns.tolist()) # Debug
+    return df
+
+# helper function
+def normalize_column_names(df, format_type):
+    if format_type == 'market':
+        column_mapping = {
+            'Genel Memnuniyet': 'General Satisfaction',
+            'Ürün Kalitesi': 'Product Quality',
+            'Ürün Çeşitliliği': 'Product Variety',
+            'Ürünlerin Tazeliği': 'Product Freshness',
+            'Mağaza Temizliği': 'Store Cleaniness',
+            'Personel Yardımseverliği ve Güler Yüzlülüğü': 'Staff Quality',
+            'Fiyat/Performans Oranı': 'Pricing',
+            'Bekleme Süresi': 'Waiting Time',
+            'Tavsiye Etme Olasılığı': 'Recommendation Likelihood',
+            # 'Ek Yorumlar ve Öneriler'
+            # 'İsim'
+        }
+        # ADD PRINT ERROR
+    elif format_type == 'doner':
+        column_mapping = {
+            'Genel Memnuniyet': 'General Satisfaction',
+            'Dönerin Lezzeti ve Kalitesi': 'Doner Taste and Quality',
+            'Menü Seçenekleri': 'Menu Options',
+            'Hizmet Hızı': 'Service Speed',
+            'Temizlik': 'Cleanliness',
+            'Personel Güler Yüzlülüğü ve Yardımseverliği': 'Staff Quality',
+            'Porsiyon Büyüklüğü': 'Serving Size',
+            'Fiyat/Performans Oranı': 'Pricing',
+            'Tekrar Ziyaret Etme Olasılığı': 'Revisit Likelihood',
+            # 'Ek Yorumlar ve Öneriler'
+            # 'İsim'
+        }
+    elif format_type == 'restaurant':
+        column_mapping = {
+            'Genel Deneyim': 'Overall Experience',
+            'Yemek Kalitesi': 'Food Quality',
+            'Menü Çeşitliliği': 'Menu Variety',
+            'Hizmet Kalitesi': 'Service Quality',
+            'Temizlik': 'Cleanliness',
+            'Fiyat/Performans Oranı': 'Pricing',
+            'Çevre': 'Restaurant Atmosphere',
+            'Bekleme Süresi': 'Waiting Time',
+            'Tavsiye Etme Olasılığı': 'Recommendation Likelihood',
+            # 'Ek Yorumlar'
+            # 'İsim'
+        }
+
+    df.rename(columns=column_mapping, inplace=True)
+    return df
+
+    '''
     print('Normalizing column names...') # Debugging statement
     normalized_columns = {}
     for col in df.columns:
@@ -181,24 +276,41 @@ def normalize_column_names(df):
         print(f"Normalized '{col}' to '{normalized_col}") # Debugging statement
     df.rename(columns=normalized_columns, inplace=True)
     return df
+    '''
 
-def clean_data(df):
+
+def clean_data(df, format_type):
     print("Cleaning data...") # Debugging statement
-    # Define the expected rating columns
-    expected_columns = [
-        'Genel Memnuniyet', 'Dönerin Lezzeti ve Kalitesi', 'Menü Seçenekleri',
-        'Hizmet Hızı', 'Temizlik', 'Personel Güler Yüzlülüğü ve Yardımseverliği',
-        'Porsiyon Büyüklüğü', 'Fiyat/Performans Oranı', 'Tekrar Ziyaret Etme Olasılığı',
-        'Ürün Kalitesi', 'Ürün Çeşitliliği', 'Ürünlerin Tazeliği', 'Mağaza Temizliği',
-        'Personel Yardımseverliği ve Güler Yüzlülüğü', 'Genel Deneyim', 'Menü Çeşitliliği',
-        'Hizmet Kalitesi', 'Çevre', 'Bekleme Süresi', 'Tavsiye Etme Olasiliği' 
-    ]
+    
+    # Define the expected columns for each format type
+    expected_columns_mapping = {
+        'market': [
+            'Genel Memnuniyet', 'Ürün Kalitesi', 'Ürün Çeşitliliği',
+            'Ürünlerin Tazeliği', 'Mağaza Temizliği',
+            'Personel Yardımseverliği ve Güler Yüzlülüğü', 'Fiyat/Performans Oranı',
+            'Bekleme Süresi', 'Tavsiye Etme Olasılığı'
+        ],
+        'doner': [
+            'Genel Memnuniyet', 'Dönerin Lezzeti ve Kalitesi', 'Menü Seçenekleri',
+            'Hizmet Hızı', 'Temizlik',
+            'Personel Güler Yüzlülüğü ve Yardımseverliği', 'Porsiyon Büyüklüğü',
+            'Fiyat/Performans Oranı', 'Tekrar Ziyaret Etme Olasılığı'
+        ],
+        'restaurant': [
+            'Genel Deneyim', 'Yemek Kalitesi', 'Menü Çeşitliliği',
+            'Hizmet Kalitesi', 'Temizlik', 'Fiyat/Performans Oranı', 'Çevre',
+            'Bekleme Süresi', 'Tavsiye Etme Olasılığı'
+        ]
+    }
+
+    # Get the expected columns for the given format type
+    expected_columns = expected_columns_mapping.get(format_type, []) 
     
     missing_columns = []
 
     # Check and clean only the columns that are present in the DataFrame
-    for col in :
-        if col in df.expected_columnscolumns: # CHECK THIS!!
+    for col in expected_columns:
+        if col in df.columns: # CHECK THIS!!
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             print(f"Cleaned column '{col}'") # Debugging statement
         else:
@@ -208,31 +320,7 @@ def clean_data(df):
         print(f"Warning: The following columns were not found in the data and were skipped: {', '.join(missing_columns)}")
 
     return df
-
-def read_sheet_data(service, spreadsheet_id):
-    # For debugging purposes
-    sheet = service.spreadsheets()
-    spreadsheet_metadata = sheet.get(spreadsheetId=spreadsheet_id).execute()
-    spreadsheet_name = spreadsheet_metadata.get('properties', {}).get('title', 'Unknown Spreadsheet')
-    print(f"Reading spreadsheet: {spreadsheet_name}") # Debugging statement BAD
-
-    result = sheet.values().get(spreadsheetId=spreadsheet_id,
-                                range=RANGE_NAME).execute()
-    values = result.get('values', [])
-
-    if not values:
-        print('No data found.')
-        return None
-    
-    # Convert the data to a DataFrame
-    df = pd.DataFrame(values[1:], columns=values[0])
-
-    # Normalize the column names by removing diacritical marks
-    df = normalize_column_names(df)
-
-    print("Normalized Columns:", df.columns.tolist()) # Debugging statement BAD
-    return df
-
+///////////////////////////////////////////////////////////////////////////////
 def summarize_data(df):
     print("Summarizing data...") # Debugging statement
     summary = {}
@@ -388,6 +476,17 @@ def send_email(service, recipient, subject, body):
     send_message = service.users().messages().send(userId='me', body=message).execute()
     print(f'Message sent to {recipient} with ID: {send_message["id"]}')
 """
+# Webhook endpoint to trigger report generation
+# @app.route()
+
 if __name__ == "__main__":
     gmail_service = authenticate_gmail()
     check_email(gmail_service)
+    scheduler()
+
+    # Keep the script running
+    try:
+        while True:
+            time.sleep(1)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
