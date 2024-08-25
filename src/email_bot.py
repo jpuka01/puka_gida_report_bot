@@ -7,6 +7,7 @@ Purpose: Main script for handling email triggers, processing data, responses,
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, request, jsonify
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -44,6 +45,7 @@ Effects:     Reads from the 'token.json' file
 Assumptions: The file 'token.json' exists and contains valid credentials for 
              the Gmail
 '''
+# CHANGE FUNCTION CONTRACT
 def authenticate_gmail():
     creds = None
     if os.path.exists('token.json'):
@@ -51,14 +53,35 @@ def authenticate_gmail():
                                                       scopes=SCOPES)
         print("Loaded Gmail credentials from token.json successfuly.\n") # Debug --> 1; GOOD
 
-    else:
-        print("Error: token.json not found.\n")
-        return None
+    # Refresh the token if it has expired
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            print("Token refreshed successfully.\n") # Debug --> 2; GOOD
+            # Save the refresh token back to token.json
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+        except RefreshError:
+            print("Token expired or revoked. Initiating a new token \
+                  authentication flow.\n")
+            creds = None
+    
+    # If no valid credentials were loaded or token.json does not exist
+    if not creds:
+        if not os.path.exists('credentials.json'):
+            print("Error: credentials.json not found.\n")
+            return None
+        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', 
+                                                         scopes=SCOPES)
+        creds = flow.run_local_server(port=0)
+        # Save the new credentials to token.json
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+        print("New token saved to token.json.\n")
 
     gmail_service = build('gmail', 'v1', credentials=creds)
-    print(f"Gmail service started: {gmail_service}.\n") # Debug --> 2; GOOD (Gmail service started: <googleapiclient.discovery.Resource object at 0x00000XXXXXXX>)
+    print(f"Gmail service started: {gmail_service}.\n") # Debug --> 3; GOOD (Gmail service started: <googleapiclient.discovery.Resource object at 0x00000XXXXXXX>)
     return gmail_service
-
 '''
 Name:        check_email 
 Purpose:     Checks the 10 most recent emails for a "Generate Report" string
@@ -97,7 +120,7 @@ def check_email(gmail_service): # include google_sheets_service
                 if data['name'] == 'Subject':
                     email_subject = data['value']
                 if data['name'] == 'From':
-                    email_sender = extract_email_address(data['value']) # WHY VALUE INSTEAD OF NAME?
+                    email_sender = extract_email_address(data['value'])
 
             # Verify if the email sender is authorized and if the subject
             # contains the trigger phase
@@ -162,7 +185,6 @@ def extract_email_address(email_string):
     match = re.search(r'[\w\.-]+@[\w\.-]+', email_string)
     print(f"Extracted email address: {match}") # Debug --> 4; GOOD
     return match.group(0).strip().lower() if match else None
-
 '''
 Name:        authenticate_google_sheets
 Purpose:     Authenticates with the Sheets API using a 'token.json' file that 
@@ -188,9 +210,8 @@ def authenticate_google_sheets():
     google_sheets_service = build('sheets', 'v4', credentials=creds)
     print(f"Authenticated Google Sheets service: {google_sheets_service}" ) # Debug --> 8; GOOD (Authenticated Google Sheets service: <googleapiclient.discovery.Resource object at 0x000001C5CFBCCA40>)
     return google_sheets_service
-r"""
 ###############################################################################
-
+r"""
 def read_sheet_data(google_sheets_service, spreadsheet_id):
     format_type = SPREADSHEET_IDS[spreadsheet_id]
     RANGE_NAME = 'Form Responses 1!A1:P1000'
@@ -481,6 +502,7 @@ def send_email(service, recipient, subject, body):
 
 if __name__ == "__main__":
     gmail_service = authenticate_gmail()
+
     check_email(gmail_service)
     scheduler()
 
