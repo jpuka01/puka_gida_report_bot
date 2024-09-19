@@ -210,8 +210,7 @@ def authenticate_google_sheets():
     google_sheets_service = build('sheets', 'v4', credentials=creds)
     print(f"Authenticated Google Sheets service: {google_sheets_service}" ) # Debug --> 8; GOOD (Authenticated Google Sheets service: <googleapiclient.discovery.Resource object at 0x000001C5CFBCCA40>)
     return google_sheets_service
-###############################################################################
-r"""
+
 def read_sheet_data(google_sheets_service, spreadsheet_id):
     format_type = SPREADSHEET_IDS[spreadsheet_id]
     RANGE_NAME = 'Form Responses 1!A1:P1000'
@@ -284,7 +283,7 @@ def normalize_column_names(df, format_type):
     df.rename(columns=column_mapping, inplace=True)
     return df
 
-    '''
+    
     print('Normalizing column names...') # Debugging statement
     normalized_columns = {}
     for col in df.columns:
@@ -297,7 +296,7 @@ def normalize_column_names(df, format_type):
         print(f"Normalized '{col}' to '{normalized_col}") # Debugging statement
     df.rename(columns=normalized_columns, inplace=True)
     return df
-    '''
+    
 
 
 def clean_data(df, format_type):
@@ -341,7 +340,7 @@ def clean_data(df, format_type):
         print(f"Warning: The following columns were not found in the data and were skipped: {', '.join(missing_columns)}")
 
     return df
-///////////////////////////////////////////////////////////////////////////////
+
 def summarize_data(df):
     print("Summarizing data...") # Debugging statement
     summary = {}
@@ -496,7 +495,7 @@ def send_email(service, recipient, subject, body):
     message = {'raw': raw}
     send_message = service.users().messages().send(userId='me', body=message).execute()
     print(f'Message sent to {recipient} with ID: {send_message["id"]}')
-"""
+
 # Webhook endpoint to trigger report generation
 # @app.route()
 
